@@ -12,13 +12,12 @@ let dispatch = null
 let timeout = null
 
 const getEventStream = async () => {
-  if (es === null) {
-    return httpClient(`${REST_URL}/keepalive/eventSource`).then(() => {
-      es = new EventSource(
-        baseUrl(`/app/api/events?jwt=${localStorage.getItem('token')}`)
-      )
-      return es
-    })
+  if (!es) {
+    // Call `keepalive` to refresh the jwt token
+    await httpClient(`${REST_URL}/keepalive/eventSource`)
+    es = new EventSource(
+      baseUrl(`${REST_URL}/events?jwt=${localStorage.getItem('token')}`)
+    )
   }
   return es
 }
@@ -26,15 +25,15 @@ const getEventStream = async () => {
 // Reestablish the event stream after 20 secs of inactivity
 const setTimeout = (value) => {
   currentIntervalCheck = value
-  if (timeout != null) {
+  if (timeout) {
     window.clearTimeout(timeout)
   }
-  timeout = window.setTimeout(() => {
-    if (es != null) {
+  timeout = window.setTimeout(async () => {
+    if (es) {
       es.close()
     }
     es = null
-    startEventStream(dispatch)
+    await startEventStream(dispatch)
   }, currentIntervalCheck)
 }
 
@@ -43,7 +42,7 @@ const stopEventStream = () => {
     es.close()
   }
   es = null
-  if (timeout != null) {
+  if (timeout) {
     window.clearTimeout(timeout)
   }
   timeout = null
@@ -70,18 +69,21 @@ const startEventStream = async () => {
     console.log('Cannot create a unauthenticated EventSource connection')
     return Promise.reject()
   }
-  getEventStream().then((newStream) => {
-    newStream.addEventListener('serverStart', eventHandler)
-    newStream.addEventListener('scanStatus', eventHandler)
-    newStream.addEventListener('keepAlive', eventHandler)
-    newStream.onerror = (e) => {
-      console.log('EventStream error', e)
-      setTimeout(reconnectIntervalCheck)
-      dispatch(serverDown())
-    }
-    es = newStream
-    return es
-  })
+  return getEventStream()
+    .then((newStream) => {
+      newStream.addEventListener('serverStart', eventHandler)
+      newStream.addEventListener('scanStatus', eventHandler)
+      newStream.addEventListener('keepAlive', eventHandler)
+      newStream.onerror = (e) => {
+        console.log('EventStream error', e)
+        setTimeout(reconnectIntervalCheck)
+        dispatch(serverDown())
+      }
+      return newStream
+    })
+    .catch((e) => {
+      console.log(`Error connecting to server:`, e)
+    })
 }
 
 export { setDispatch, startEventStream, stopEventStream }
